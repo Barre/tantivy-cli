@@ -160,15 +160,29 @@ fn index_documents<D: Document>(
     let mut num_docs = 0;
     let mut num_docs_byte = 0;
     let mut num_docs_byte_total = 0;
-
+    
+    let mut docs_since_commit = 0;
+    const COMMIT_INTERVAL: usize = 1_000_000; 
+    
+    let mut last_docstamp = 0u64;
     let mut last_print = Instant::now();
+    
     for (doc, doc_size) in doc_receiver {
         index_writer.add_document(doc)?;
 
         num_docs_total += 1;
         num_docs += 1;
+        docs_since_commit += 1;
         num_docs_byte += doc_size;
         num_docs_byte_total += doc_size;
+        
+        if docs_since_commit >= COMMIT_INTERVAL {
+            println!("Committing after {} documents (total: {})", docs_since_commit, num_docs_total);
+            last_docstamp = index_writer.commit()?;
+            docs_since_commit = 0;
+            println!("Commit succeeded, docstamp at {}", last_docstamp);
+        }
+        
         if num_docs % 128 == 0 {
             let new = Instant::now();
             let elapsed_since_last_print = new - last_print;
@@ -188,10 +202,14 @@ fn index_documents<D: Document>(
             }
         }
     }
-    let res = index_writer.commit()?;
+    
+    if docs_since_commit > 0 {
+        println!("Final commit for {} remaining documents", docs_since_commit);
+        last_docstamp = index_writer.commit()?;
+    }
 
     Ok(IndexResult {
-        docstamp: res,
+        docstamp: last_docstamp,
         num_docs_byte: num_docs_byte_total,
     })
 }
